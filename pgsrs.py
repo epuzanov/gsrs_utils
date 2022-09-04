@@ -27,6 +27,11 @@ class psubstance(object):
         self._protected = []
         self._obj = json_decode(substance)
         self._protected_headers["ori"] = self._obj.get("_self", "Unknown")
+        if self.verbose == "-v":
+            print("Substance Origin: %s"%self._protected_headers["ori"])
+            print("Substance cannot be Validated")
+            print("Export Version: Unknown")
+            print("Export Date: Unknown")
 
     def load(self, fh):
         if isinstance(fh, IOBase):
@@ -41,7 +46,7 @@ class psubstance(object):
         else:
             return json_encode(self._obj)
 
-    def ref2index(self):
+    def uuid2index(self):
         '''replace the references uuid with the index of the reference in the substances references list'''
         sobj = json_encode(self._obj)
         for idx in range(len(self._obj.get("references", []))):
@@ -70,31 +75,43 @@ class psubstance(object):
                 if r_uuid in v_refs and r_uuid not in sobj:
                     del self._obj["references"][idx]
 
-    def scrub(self, obj):
+    def scrub(self, obj=None):
         '''remove bad_keys from the substances object'''
+        if obj is None:
+            obj = self._obj
         if isinstance(obj, dict):
             for key in list(obj.keys()):
                 if key == "uuid" and "docType" in obj:
                     self.scrub(obj[key])
                 elif key in self.bad_keys:
                     del obj[key]
+                elif obj[key] is None:
+                    continue
                 else:
                     self.scrub(obj[key])
         elif isinstance(obj, list):
             for i in reversed(range(len(obj))):
+                if obj[i] is None:
+                    continue
                 self.scrub(obj[i])
         else:
             pass
 
-    def find_protected(self, obj, parent="self._obj"):
+    def find_protected(self, obj=None, parent="self._obj"):
         '''find protected elements'''
+        if obj is None:
+            obj = self._obj
         if isinstance(obj, dict):
             if "access" in obj and obj["access"]:
                 self._protected.append(parent)
             for key in list(obj.keys()):
+                if obj[key] is None:
+                    continue
                 self.find_protected(obj[key], "%s[\"%s\"]"%(parent, key))
         elif isinstance(obj, list):
             for i in reversed(range(len(obj))):
+                if obj[i] is None:
+                    continue
                 self.find_protected(obj[i], "%s[%s]"%(parent, i))
         else:
             pass
@@ -110,6 +127,7 @@ class psubstance(object):
             "alg": "RSA-OAEP-256",
             "enc": "A256CBC-HS512",
             "type": "JWE",
+            "zip": "DEF",
             "kid": ""
         }
         private_key = self.get_private_key()
@@ -139,6 +157,7 @@ class psubstance(object):
     def verify(self, signed):
         jwstoken = jws.JWS()
         jwstoken.deserialize(signed.decode("UTF-8"))
+        print("Substance Origin: %s"%jwstoken.jose_header.get("ori", "Unknown"))
         try:
             jwstoken.verify(self._keyset.get_key(jwstoken.jose_header.get("kid")))
             if jwstoken.is_valid:
@@ -148,7 +167,6 @@ class psubstance(object):
                     print("Substance is Valid")
                     print("Export Version: %s"%jwstoken.jose_header.get("ver", "Unknown"))
                     print("Export Date: %s"%jwstoken.jose_header.get("dat", "Unknown"))
-                    print("Substance Origin: %s"%jwstoken.jose_header.get("ori", "Unknown"))
             else:
                 if self.verbose == "-v":
                     print("Substance is not Valid")
@@ -158,7 +176,9 @@ class psubstance(object):
                 print(e)
             self._obj = {}
 
-    def decode(self, obj, parent="self._obj"):
+    def decode(self, obj=None, parent="self._obj"):
+        if obj is None:
+            obj = self._obj
         if isinstance(obj, dict):
             if "ciphertext" in obj and obj["ciphertext"]:
                 jwetoken = jwe.JWE()
@@ -169,15 +189,20 @@ class psubstance(object):
                 except Exception as e:
                     eval("%s.clear()"%parent)
             for key in list(obj.keys()):
+                if obj[key] is None:
+                    continue
                 self.decode(obj[key], "%s[\"%s\"]"%(parent, key))
         elif isinstance(obj, list):
             for i in reversed(range(len(obj))):
+                if obj[i] is None:
+                    continue
                 self.decode(obj[i], "%s[%s]"%(parent, i))
         else:
             pass
 
-    def removeEmptyRefs(self, obj):
-        if obj == self._obj:
+    def restoreRefs(self, obj=None):
+        if obj is None:
+            obj = self._obj
             for idx in reversed(range(len(self._obj.get("references", [])))):
                 if self._obj["references"][idx]:
                     self._obj["references"][idx]["uuid"] = str(uuid.uuid4())
@@ -189,34 +214,38 @@ class psubstance(object):
                     else:
                         del obj["references"][idx]
             for key in list(obj.keys()):
-                self.removeEmptyRefs(obj[key])
+                if obj[key] is None:
+                    continue
+                self.restoreRefs(obj[key])
         elif isinstance(obj, list):
             for i in reversed(range(len(obj))):
-                self.removeEmptyRefs(obj[i])
+                if obj[i] is None:
+                    continue
+                self.restoreRefs(obj[i])
         else:
             pass
 
-    def removeEmptyObjects(self, obj):
+    def removeEmptyObjects(self, obj=None):
+        if obj is None:
+            obj = self._obj
         if isinstance(obj, dict):
             for key in list(obj.keys()):
                 if obj[key] == {}:
                     del obj[key]
+                elif obj[key] is None:
+                    continue
                 else:
                     self.removeEmptyObjects(obj[key])
         elif isinstance(obj, list):
             for i in reversed(range(len(obj))):
                 if obj[i] == {}:
                     del obj[i]
+                elif obj[i] is None:
+                    continue
                 else:
                     self.removeEmptyObjects(obj[i])
         else:
             pass
-
-    def prepare(self):
-        self.deleteValidationNotes()
-        self.ref2index()
-        self.scrub(self._obj)
-        self.find_protected(self._obj)
 
     def load_keyset(self, fh):
         self._keyset = jwk.JWKSet()
@@ -277,12 +306,14 @@ def main():
             else:
                 s.loads(line.strip())
             if not sys.argv[2].endswith(".gsrs"):
-                s.decode(s._obj)
-                s.removeEmptyRefs(s._obj)
-                s.removeEmptyObjects(s._obj)
-            s.ref2index()
+                s.decode()
+                s.restoreRefs()
+                s.removeEmptyObjects()
             if not sys.argv[3].endswith(".gsrs"):
-                s.prepare()
+                s.deleteValidationNotes()
+                s.uuid2index()
+                s.scrub()
+                s.find_protected()
                 s.encode_protected()
             if s.verbose == "-vv":
                 print(s.dumps(True))
