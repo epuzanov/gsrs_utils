@@ -124,10 +124,9 @@ class psubstance(object):
     def encode_protected(self):
         '''encode protected elements'''
         protected_header = {
-            "alg": "RSA-OAEP-256",
-            "enc": "A256CBC-HS512",
-            "type": "JWE",
-            "zip": "DEF",
+            "alg": "RSA-OAEP",
+            "enc": "A256GCM",
+            "typ": "JOSE+JSON",
             "kid": ""
         }
         private_key = self.get_private_key()
@@ -187,6 +186,7 @@ class psubstance(object):
                     eval("%s.clear()"%parent)
                     eval("%s.update(json_decode(jwetoken.payload))"%parent)
                 except Exception as e:
+                    print(e)
                     eval("%s.clear()"%parent)
             for key in list(obj.keys()):
                 if obj[key] is None:
@@ -273,7 +273,7 @@ def create_key_material():
 
 def usage():
     print("Usage: pgsrs.py <JWK Set set> <input file> <output file> [-v[v]]")
-    print("       <JWK Set file> - NCATS|FDA|USP")
+    print("       <JWK Set file> - NCATS|EMA|USP")
     print("       <input file>, <output file> - *.gsrs|*.gsrsp|*.gsrsps")
     print("           *.gsrs - standard .gsrs file")
     print("           *.gsrsp - portable file without signatures")
@@ -281,13 +281,13 @@ def usage():
     print("       -v - verbose")
 
 def main():
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 4:
         usage()
         sys.exit(2)
-    if sys.argv[1] not in ("NCATS", "FDA", "USP"):
+    if sys.argv[1] not in ("NCATS", "EMA", "USP"):
         usage()
         sys.exit(2)
-    if sys.argv[2][-5:] not in (".gsrs", "gsrsp", "srsps"):
+    if sys.argv[2][-5:] not in ("on.gz", ".gsrs", "gsrsp", "srsps"):
         usage()
         sys.exit(2)
     if sys.argv[3][-5:] not in (".gsrs", "gsrsp", "srsps"):
@@ -305,7 +305,7 @@ def main():
                 s.verify(line.strip())
             else:
                 s.loads(line.strip())
-            if not sys.argv[2].endswith(".gsrs"):
+            if not sys.argv[2].endswith(".gsrs") and not sys.argv[2].endswith("on.gz"):
                 s.decode()
                 s.restoreRefs()
                 s.removeEmptyObjects()
